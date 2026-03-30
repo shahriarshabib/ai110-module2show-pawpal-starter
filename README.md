@@ -22,6 +22,18 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Features
+
+- **Owner profile** — Set your name and daily availability window (e.g., 08:00–20:00). The app respects this window when placing every task.
+- **Multi-pet support** — Register as many pets as you need. Each pet has its own task list; the scheduler plans across all of them at once.
+- **Rich task model** — Every task has a type (walk, feeding, medication, etc.), priority (high/medium/low), duration, optional fixed time, and optional recurrence.
+- **Priority-aware scheduling** — Flexible tasks are placed in priority order (HIGH before MEDIUM before LOW) within the available window. Fixed-time tasks are anchored to their requested slot.
+- **Recurring task auto-spawn** — Completing a recurring task (e.g., daily medication) automatically adds the next occurrence at `scheduled_time + recurrence_interval`, so nothing falls through the cracks.
+- **Sort & filter** — Browse tasks sorted by time or priority, and filter by pet, completion status, task type, or priority level.
+- **Conflict detection** — After generating a schedule, the app scans for overlapping time windows and surfaces a clear warning with details — it never silently drops a task.
+- **Schedule explanation** — Every slot includes a plain-English reason ("Scheduled at 09:00 — high priority") so the owner understands why the plan looks the way it does.
+- **Overdue tracking** — The sidebar flags tasks whose scheduled time has passed and that haven't been completed.
+
 ## Smarter Scheduling
 
 PawPal+ goes beyond a simple to-do list with four algorithmic features:

@@ -64,13 +64,23 @@ The scheduler checks for conflicts *after* placing tasks rather than preventing 
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+AI was used at every phase of this project, but the role shifted as the work progressed:
+
+- **Design brainstorming (Phase 1):** AI generated the initial Mermaid.js UML diagram from a plain-English description of the four classes. This was the fastest part — describing the system in natural language and getting a structured diagram in seconds was far quicker than drawing it by hand. The most useful prompt pattern was: *"Here are my four classes and their attributes — generate a class diagram showing relationships."*
+
+- **Code scaffolding (Phase 2):** AI filled in method stubs from the UML. The most helpful prompts were specific: *"Implement `generate_schedule()` so that fixed-time tasks are placed first, then flexible tasks fill remaining gaps in priority order."* Vague prompts like *"implement the scheduler"* produced overly complex results.
+
+- **Algorithm review (Phases 3–4):** AI was used as a "reviewer" by sharing a method and asking *"What edge cases is this missing?"* This surfaced the `detect_conflicts` timing issue (operating on Tasks before scheduling vs. on ScheduleEntry after) and the recurring task spawn problem.
+
+- **Test generation (Phase 5):** AI generated test stubs well, but tended to write only happy-path tests. Prompting specifically for *"edge cases and failure modes"* was necessary to get tests like `test_filter_empty_input_returns_empty_list` and `test_complete_task_bad_id_returns_false`.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+One AI suggestion that was modified: when asked to implement `detect_conflicts()`, the AI's first version compared `Task` objects directly using their `scheduled_time` attribute. This would have worked for tasks with a fixed time, but silently produced no conflicts for flexible tasks (which have `scheduled_time = None`). The issue was that conflicts only exist *after* the scheduler assigns times — not before.
+
+The fix was to move conflict detection downstream to operate on `ScheduleEntry` objects instead of `Task` objects. The AI's approach was verified by writing a test with two overlapping flexible tasks and confirming that the original version returned no conflicts where it should have found one.
+
+The rule applied: *if a method's inputs don't contain all the information needed to compute its output, the method is operating at the wrong stage.*
 
 ---
 
@@ -78,13 +88,24 @@ The scheduler checks for conflicts *after* placing tasks rather than preventing 
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+The test suite covers 40 behaviours across five categories:
+
+1. **Task lifecycle** — `mark_complete()` flips status; `is_overdue()` respects completion state and reference time; `to_dict()` produces the expected keys.
+2. **Pet management** — `add_task()` stamps `pet_name`; `remove_task()` uses id not title; duplicate prevention; `complete_task()` auto-spawns recurring tasks.
+3. **Owner management** — Pet aggregation, duplicate guard, `available_minutes()` arithmetic.
+4. **Scheduling algorithms** — Priority ordering, time window enforcement (skip if too long, include if exactly fits), sort by time (ascending, unscheduled last), multi-criteria filter.
+5. **Conflict detection** — Overlapping windows detected; non-overlapping windows clean; exact same start time flagged.
+
+Edge cases were the most valuable tests. `test_schedule_empty_when_pet_has_no_tasks`, `test_filter_empty_input_returns_empty_list`, and `test_explain_plan_before_generate_returns_safe_message` all test defensive behaviour that would otherwise only surface as confusing runtime errors in the UI.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+★★★★☆ (4/5)
+
+The core scheduling logic is thoroughly tested and handles the known edge cases. Confidence is not 5/5 because:
+- The Streamlit session-state interactions (e.g., what happens if a user completes a task mid-schedule) are not covered by automated tests.
+- The scheduler assumes all tasks happen on a single day; multi-day scheduling is untested territory.
+- If given more time, the next edge cases to test would be: tasks whose recurrence spans midnight, an owner with 10+ pets and 50+ tasks (performance), and concurrent session-state mutations.
 
 ---
 
@@ -92,12 +113,12 @@ The scheduler checks for conflicts *after* placing tasks rather than preventing 
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The clean separation between the logic layer (`pawpal_system.py`) and the UI layer (`app.py`) worked very well in practice. Because all intelligence lives in `Scheduler`, `Pet`, and `Task`, the Streamlit UI became thin wiring code. When a new feature was added to the backend (e.g., `filter_tasks()`), it appeared in the UI with just a few lines in `app.py`. This "CLI-first" workflow also made testing straightforward — all 40 tests run against pure Python with no Streamlit dependency.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+The scheduler is "greedy" — it places tasks in priority order without looking ahead. A greedy scheduler can leave a large gap in the morning because it placed a 5-minute HIGH-priority task there, then skips a 60-minute MEDIUM-priority appointment that would have fit. A better approach would be a bin-packing or interval-scheduling algorithm that maximises total scheduled time. This would be the first algorithmic redesign in a second iteration.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+The most important lesson was: **AI is a fast first-drafter, not a final architect.** AI could generate a working skeleton in minutes, but it consistently produced designs that were one level too shallow — missing `ScheduleEntry`, missing the `pet_name` stamp, operating conflict detection at the wrong stage. The value of the human role was not writing code faster than AI, but knowing *what questions to ask* to expose the gaps. The prompts that produced the best results were always the ones that started with a constraint or a failure scenario, not a feature request.
