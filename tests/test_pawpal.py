@@ -215,3 +215,147 @@ def test_explain_plan_contains_task_title():
     scheduler.generate_schedule()
     explanation = scheduler.explain_plan()
     assert "Morning walk" in explanation
+
+
+# ---------------------------------------------------------------------------
+# sort_by_time tests
+# ---------------------------------------------------------------------------
+
+def test_sort_by_time_orders_ascending():
+    """Tasks with earlier scheduled_time should appear first."""
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+    today = datetime.today().replace(second=0, microsecond=0)
+    late  = make_task("Late",  scheduled_time=today.replace(hour=18))
+    early = make_task("Early", scheduled_time=today.replace(hour=7))
+    mid   = make_task("Mid",   scheduled_time=today.replace(hour=12))
+    result = scheduler.sort_by_time([late, early, mid])
+    assert [t.title for t in result] == ["Early", "Mid", "Late"]
+
+
+def test_sort_by_time_unscheduled_tasks_go_last():
+    """Tasks with no scheduled_time should appear after fixed-time tasks."""
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+    today = datetime.today().replace(second=0, microsecond=0)
+    fixed = make_task("Fixed", scheduled_time=today.replace(hour=9))
+    flex  = make_task("Flex")
+    result = scheduler.sort_by_time([flex, fixed])
+    assert result[0].title == "Fixed"
+    assert result[1].title == "Flex"
+
+
+# ---------------------------------------------------------------------------
+# filter_tasks tests
+# ---------------------------------------------------------------------------
+
+def test_filter_by_pet_name():
+    """filter_tasks(pet_name=) should return only that pet's tasks."""
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+    dog = make_pet("Mochi")
+    cat = make_pet("Luna", species="cat")
+    t1 = make_task("Walk"); t1.pet_name = "Mochi"
+    t2 = make_task("Play"); t2.pet_name = "Luna"
+    result = scheduler.filter_tasks([t1, t2], pet_name="Mochi")
+    assert len(result) == 1
+    assert result[0].pet_name == "Mochi"
+
+
+def test_filter_by_completed_false():
+    """filter_tasks(completed=False) should exclude finished tasks."""
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+    done = make_task("Done"); done.mark_complete()
+    pending = make_task("Pending")
+    result = scheduler.filter_tasks([done, pending], completed=False)
+    assert len(result) == 1
+    assert result[0].title == "Pending"
+
+
+def test_filter_combined():
+    """Combining pet_name and priority filters should apply both."""
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+    t1 = make_task("A", priority=Priority.HIGH); t1.pet_name = "Mochi"
+    t2 = make_task("B", priority=Priority.LOW);  t2.pet_name = "Mochi"
+    t3 = make_task("C", priority=Priority.HIGH); t3.pet_name = "Luna"
+    result = scheduler.filter_tasks([t1, t2, t3], pet_name="Mochi", priority=Priority.HIGH)
+    assert len(result) == 1
+    assert result[0].title == "A"
+
+
+# ---------------------------------------------------------------------------
+# Recurring task auto-spawn tests
+# ---------------------------------------------------------------------------
+
+def test_complete_recurring_task_spawns_next():
+    """Completing a recurring task via Pet.complete_task() should add a new task."""
+    pet = make_pet()
+    task = Task("Breakfast", TaskType.FEEDING, 10, Priority.HIGH,
+                is_recurring=True, recurrence_interval_hours=12)
+    pet.add_task(task)
+    assert len(pet.tasks) == 1
+    pet.complete_task(task.id)
+    assert len(pet.tasks) == 2
+    assert pet.tasks[0].completed is True
+    assert pet.tasks[1].completed is False
+    assert pet.tasks[1].title == "Breakfast"
+
+
+def test_complete_nonrecurring_task_does_not_spawn():
+    """Completing a non-recurring task should not add a new task."""
+    pet = make_pet()
+    task = make_task("One-off walk")
+    pet.add_task(task)
+    pet.complete_task(task.id)
+    assert len(pet.tasks) == 1
+    assert pet.tasks[0].completed is True
+
+
+def test_recurring_next_scheduled_time_is_offset():
+    """The spawned task's scheduled_time should be interval hours after the original."""
+    from datetime import timedelta
+    pet = make_pet()
+    base_time = datetime(2026, 1, 1, 8, 0)
+    task = Task("Meds", TaskType.MEDICATION, 5, Priority.HIGH,
+                scheduled_time=base_time, is_recurring=True,
+                recurrence_interval_hours=24)
+    pet.add_task(task)
+    pet.complete_task(task.id)
+    spawned = pet.tasks[1]
+    assert spawned.scheduled_time == base_time + timedelta(hours=24)
+
+
+# ---------------------------------------------------------------------------
+# Conflict detection tests
+# ---------------------------------------------------------------------------
+
+def test_detect_conflicts_finds_overlap():
+    """Two entries whose windows overlap should be returned as a conflict pair."""
+    owner = Owner("Jordan", available_start="08:00", available_end="20:00")
+    scheduler = Scheduler(owner)
+    today = datetime.today().replace(second=0, microsecond=0)
+    t1 = make_task("Vet",      duration=60, scheduled_time=today.replace(hour=10))
+    t2 = make_task("Grooming", duration=45, scheduled_time=today.replace(hour=10, minute=30))
+    pet = make_pet()
+    pet.add_task(t1); pet.add_task(t2)
+    owner.add_pet(pet)
+    schedule = scheduler.generate_schedule()
+    conflicts = scheduler.detect_conflicts(schedule)
+    assert len(conflicts) >= 1
+
+
+def test_detect_conflicts_no_overlap():
+    """Non-overlapping entries should produce no conflicts."""
+    owner = Owner("Jordan", available_start="08:00", available_end="20:00")
+    scheduler = Scheduler(owner)
+    today = datetime.today().replace(second=0, microsecond=0)
+    t1 = make_task("Walk",  duration=30, scheduled_time=today.replace(hour=8))
+    t2 = make_task("Feed",  duration=10, scheduled_time=today.replace(hour=9))
+    pet = make_pet()
+    pet.add_task(t1); pet.add_task(t2)
+    owner.add_pet(pet)
+    schedule = scheduler.generate_schedule()
+    conflicts = scheduler.detect_conflicts(schedule)
+    assert conflicts == []

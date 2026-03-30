@@ -44,13 +44,19 @@ After reviewing the skeleton for missing relationships and logic bottlenecks, th
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers three constraints, applied in this order:
+
+1. **Owner availability window** (hard constraint) — any task that would end after `available_end` is silently skipped; the window is absolute.
+2. **Fixed scheduled_time** (hard constraint) — tasks with a user-specified time are placed at exactly that time, regardless of priority.
+3. **Priority** (soft constraint) — among flexible tasks, HIGH > MEDIUM > LOW determines slot order.
+
+Priority was chosen as the tiebreaker over duration because a 5-minute medication at HIGH priority is more important to the pet's health than a 30-minute LOW-priority play session, even if the play session would "fit better" in the gap.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+The scheduler checks for conflicts *after* placing tasks rather than preventing them upfront. Specifically, `detect_conflicts()` flags overlapping `ScheduleEntry` windows as a warning message instead of refusing to place a task.
+
+**Why this is reasonable:** A strict "refuse on conflict" approach would silently drop fixed-time tasks that overlap — which could mean a medication is skipped without the owner knowing. Showing a warning instead keeps all tasks visible and lets the human decide what to reschedule. The tradeoff is that the generated schedule can technically be invalid, but it favours transparency over false correctness.
 
 ---
 

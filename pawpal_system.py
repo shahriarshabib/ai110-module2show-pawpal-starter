@@ -63,9 +63,28 @@ class Task:
     completed: bool = False
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
-    def mark_complete(self) -> None:
-        """Mark this task as completed."""
+    def mark_complete(self) -> Optional[Task]:
+        """
+        Mark this task as completed.
+
+        If the task is recurring, returns a new Task for the next occurrence
+        (caller is responsible for adding it to the pet).  Returns None otherwise.
+        """
         self.completed = True
+        if self.is_recurring and self.recurrence_interval_hours is not None:
+            next_time = self.next_occurrence()
+            return Task(
+                title=self.title,
+                task_type=self.task_type,
+                duration_minutes=self.duration_minutes,
+                priority=self.priority,
+                scheduled_time=next_time,
+                is_recurring=True,
+                recurrence_interval_hours=self.recurrence_interval_hours,
+                notes=self.notes,
+                pet_name=self.pet_name,
+            )
+        return None
 
     def is_overdue(self, reference_time: Optional[datetime] = None) -> bool:
         """Return True if the task's scheduled_time has passed and it is not completed."""
@@ -115,6 +134,21 @@ class Pet:
         """Stamp pet_name onto the task and append it to this pet's task list."""
         task.pet_name = self.name
         self.tasks.append(task)
+
+    def complete_task(self, task_id: str) -> bool:
+        """
+        Mark a task complete by id.
+
+        If the task is recurring, automatically appends the next occurrence to
+        this pet's task list.  Returns True if the task was found.
+        """
+        for task in self.tasks:
+            if task.id == task_id:
+                next_task = task.mark_complete()
+                if next_task is not None:
+                    self.add_task(next_task)
+                return True
+        return False
 
     def remove_task(self, task_id: str) -> bool:
         """Remove the task with the given id; return True if found."""
@@ -217,6 +251,43 @@ class Scheduler:
             time_key = t.scheduled_time or datetime.max
             return (-t.priority.numeric(), time_key)
         return sorted(tasks, key=sort_key)
+
+    def sort_by_time(self, tasks: list[Task]) -> list[Task]:
+        """
+        Return tasks sorted by scheduled_time ascending.
+
+        Tasks with no scheduled_time are placed at the end (treated as datetime.max).
+        Within the same time bucket, higher-priority tasks come first.
+        """
+        return sorted(
+            tasks,
+            key=lambda t: (t.scheduled_time or datetime.max, -t.priority.numeric()),
+        )
+
+    def filter_tasks(
+        self,
+        tasks: list[Task],
+        *,
+        pet_name: Optional[str] = None,
+        completed: Optional[bool] = None,
+        task_type: Optional[TaskType] = None,
+        priority: Optional[Priority] = None,
+    ) -> list[Task]:
+        """
+        Return tasks matching every supplied filter (AND logic).
+
+        Pass only the keyword arguments you care about; omitted filters are ignored.
+        """
+        result = tasks
+        if pet_name is not None:
+            result = [t for t in result if t.pet_name == pet_name]
+        if completed is not None:
+            result = [t for t in result if t.completed == completed]
+        if task_type is not None:
+            result = [t for t in result if t.task_type == task_type]
+        if priority is not None:
+            result = [t for t in result if t.priority == priority]
+        return result
 
     def detect_conflicts(self, entries: list[ScheduleEntry]) -> list[tuple[ScheduleEntry, ScheduleEntry]]:
         """Return pairs of entries whose time windows overlap."""
