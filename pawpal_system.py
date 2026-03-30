@@ -45,6 +45,16 @@ class TaskType(str, Enum):
     OTHER = "other"
 
 
+def _fmt(dt: datetime) -> str:
+    """Format a datetime as 12-hour time with AM/PM and EST label, e.g. '9:30 AM EST'."""
+    return dt.strftime("%I:%M %p").lstrip("0") + " EST"
+
+
+def fmt_hhmm(hhmm: str) -> str:
+    """Convert a stored 'HH:MM' string to '9:30 AM EST' display format."""
+    return _fmt(datetime.strptime(hhmm, "%H:%M"))
+
+
 # Emoji and priority badge constants used by both CLI and Streamlit UI
 TASK_TYPE_EMOJI: dict[TaskType, str] = {
     TaskType.FEEDING:     "🍖",
@@ -171,7 +181,7 @@ class Task:
         return base + timedelta(hours=self.recurrence_interval_hours)
 
     def to_dict(self) -> dict:
-        """Serialize to a display dict suitable for Streamlit tables (times as HH:MM)."""
+        """Serialize to a display dict suitable for Streamlit tables."""
         return {
             "id": self.id,
             "icon": TASK_TYPE_EMOJI.get(self.task_type, ""),
@@ -179,7 +189,7 @@ class Task:
             "type": self.task_type.value,
             "duration_min": self.duration_minutes,
             "priority": PRIORITY_BADGE.get(self.priority, self.priority.value),
-            "scheduled_time": self.scheduled_time.strftime("%H:%M") if self.scheduled_time else "",
+            "scheduled_time": _fmt(self.scheduled_time) if self.scheduled_time else "",
             "recurring": self.is_recurring,
             "completed": self.completed,
             "pet": self.pet_name,
@@ -396,8 +406,8 @@ class ScheduleEntry:
             "task": self.task.title,
             "type": self.task.task_type.value,
             "priority": PRIORITY_BADGE.get(self.task.priority, self.task.priority.value),
-            "start": self.start_time.strftime("%H:%M"),
-            "end": self.end_time.strftime("%H:%M"),
+            "start": _fmt(self.start_time),
+            "end": _fmt(self.end_time),
             "duration_min": self.task.duration_minutes,
             "score": round(self.task.weighted_score(), 1),
             "reason": self.reason,
@@ -526,7 +536,7 @@ class Scheduler:
                     task=task,
                     start_time=start,
                     end_time=end,
-                    reason=f"Fixed appointment at {start.strftime('%H:%M')} "
+                    reason=f"Fixed appointment at {_fmt(start)} "
                            f"({task.priority.value} priority, score {task.weighted_score():.0f})",
                 ))
 
@@ -547,7 +557,7 @@ class Scheduler:
                 task=task,
                 start_time=cursor,
                 end_time=end,
-                reason=f"Scheduled at {cursor.strftime('%H:%M')} "
+                reason=f"Scheduled at {_fmt(cursor)} "
                        f"({task.priority.value} priority, score {task.weighted_score():.0f})",
             ))
             cursor = end
@@ -563,7 +573,7 @@ class Scheduler:
         for entry in self._schedule:
             emoji = TASK_TYPE_EMOJI.get(entry.task.task_type, "")
             lines.append(
-                f"  {entry.start_time.strftime('%H:%M')} - {entry.end_time.strftime('%H:%M')} "
+                f"  {_fmt(entry.start_time)} - {_fmt(entry.end_time)} "
                 f"| [{entry.task.priority.value.upper()}] {emoji} {entry.task.title} "
                 f"({entry.pet_name}, {entry.task.duration_minutes} min, "
                 f"score {entry.task.weighted_score():.0f})"

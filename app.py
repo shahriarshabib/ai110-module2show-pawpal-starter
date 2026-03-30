@@ -11,8 +11,32 @@ from datetime import datetime
 from pathlib import Path
 from pawpal_system import (
     Owner, Pet, Task, TaskType, Priority, Scheduler,
-    TASK_TYPE_EMOJI, PRIORITY_BADGE,
+    TASK_TYPE_EMOJI, PRIORITY_BADGE, fmt_hhmm, _fmt,
 )
+
+# ---------------------------------------------------------------------------
+# Time helpers
+# ---------------------------------------------------------------------------
+
+def to_24h(hour12: int, minute: int, ampm: str) -> str:
+    """Convert 12-hour inputs to a stored 'HH:MM' string."""
+    h = hour12 % 12 + (12 if ampm == "PM" else 0)
+    return f"{h:02d}:{minute:02d}"
+
+
+def time_picker(label: str, default_hour12: int = 8, default_ampm: str = "AM",
+                key_prefix: str = "") -> str:
+    """Render three columns (hour / minute / AM-PM) and return 'HH:MM' string."""
+    c1, c2, c3 = st.columns(3)
+    h  = c1.selectbox(f"{label} — Hour",   list(range(1, 13)),
+                      index=default_hour12 - 1, key=f"{key_prefix}_h",
+                      label_visibility="collapsed")
+    m  = c2.selectbox(f"{label} — Min",    [0, 15, 30, 45],
+                      key=f"{key_prefix}_m", label_visibility="collapsed")
+    ap = c3.selectbox(f"{label} — AM/PM",  ["AM", "PM"],
+                      index=0 if default_ampm == "AM" else 1,
+                      key=f"{key_prefix}_ap", label_visibility="collapsed")
+    return to_24h(h, m, ap)
 
 DATA_FILE = Path("data.json")
 
@@ -55,13 +79,11 @@ if "owner" not in st.session_state:
 if st.session_state.owner is None:
     st.subheader("Welcome! Set up your profile to get started.")
     with st.form("owner_form"):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            owner_name  = st.text_input("Your name", value="Jordan")
-        with col2:
-            avail_start = st.text_input("Available from (HH:MM)", value="08:00")
-        with col3:
-            avail_end   = st.text_input("Available until (HH:MM)", value="20:00")
+        owner_name = st.text_input("Your name", value="Jordan")
+        st.caption("Available from (EST)")
+        avail_start = time_picker("From", default_hour12=8,  default_ampm="AM", key_prefix="os")
+        st.caption("Available until (EST)")
+        avail_end   = time_picker("Until", default_hour12=8, default_ampm="PM", key_prefix="oe")
         submitted = st.form_submit_button("Create profile", use_container_width=True)
 
     if submitted and owner_name.strip():
@@ -79,7 +101,7 @@ owner: Owner = st.session_state.owner
 # ---------------------------------------------------------------------------
 with st.sidebar:
     st.header(f"👤 {owner.name}")
-    st.caption(f"Available {owner.available_start} – {owner.available_end}")
+    st.caption(f"Available {fmt_hhmm(owner.available_start)} – {fmt_hhmm(owner.available_end)}")
     st.metric("Available minutes", owner.available_minutes())
     st.metric("Pets registered", len(owner.pets))
     total   = len(owner.get_all_tasks())
@@ -159,7 +181,7 @@ with tab_pets:
                             "type": t.task_type.value,
                             "priority": PRIORITY_BADGE.get(t.priority, t.priority.value),
                             "duration": f"{t.duration_minutes} min",
-                            "time": t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "flexible",
+                            "time": _fmt(t.scheduled_time) if t.scheduled_time else "flexible",
                             "recurring": "🔁" if t.is_recurring else "",
                             "done": "✅" if t.completed else ("🔴 overdue" if t.is_overdue() else "⏳"),
                             "score": round(t.weighted_score(), 1),
@@ -202,13 +224,17 @@ with tab_tasks:
                         format_func=lambda v: PRIORITY_BADGE.get(Priority(v), v),
                     )
                 with col2:
-                    duration     = st.number_input("Duration (min)", min_value=1,
-                                                   max_value=480, value=20)
-                    has_time     = st.checkbox("Fixed time?")
-                    sched_hour   = st.number_input("Hour", min_value=0, max_value=23,
-                                                   value=8, disabled=not has_time)
-                    sched_min    = st.number_input("Minute", min_value=0, max_value=59,
-                                                   value=0, disabled=not has_time)
+                    duration  = st.number_input("Duration (min)", min_value=1,
+                                                max_value=480, value=20)
+                    has_time  = st.checkbox("Fixed time? (EST)")
+                    if has_time:
+                        st.caption("Time (EST)")
+                        _th = st.selectbox("Hour",  list(range(1, 13)), key="th")
+                        _tm = st.selectbox("Minute", [0, 15, 30, 45],   key="tm")
+                        _ta = st.selectbox("AM/PM",  ["AM", "PM"],       key="ta")
+                        task_hhmm = to_24h(_th, _tm, _ta)
+                    else:
+                        task_hhmm = None
                 is_recurring = st.checkbox("Recurring?")
                 recur_hours  = st.number_input("Repeat every N hours", min_value=1,
                                                max_value=168, value=24,
@@ -218,10 +244,10 @@ with tab_tasks:
 
             if add_task:
                 scheduled_time = None
-                if has_time:
+                if has_time and task_hhmm:
+                    h, m = map(int, task_hhmm.split(":"))
                     scheduled_time = datetime.today().replace(
-                        hour=int(sched_hour), minute=int(sched_min),
-                        second=0, microsecond=0)
+                        hour=h, minute=m, second=0, microsecond=0)
                 new_task = Task(
                     title=task_title.strip() or "Unnamed task",
                     task_type=TaskType(task_type),
@@ -274,7 +300,7 @@ with tab_tasks:
                 for t in sorted_tasks:
                     status_icon = "✅" if t.completed else ("🔴" if t.is_overdue() else "⏳")
                     type_icon   = TASK_TYPE_EMOJI.get(t.task_type, "")
-                    time_str    = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "flexible"
+                    time_str    = _fmt(t.scheduled_time) if t.scheduled_time else "flexible"
                     label = (f"{status_icon} {type_icon} **{t.title}** — {t.pet_name} | "
                              f"{PRIORITY_BADGE.get(t.priority, t.priority.value)} | "
                              f"{time_str} | {t.duration_minutes} min | "
@@ -336,9 +362,9 @@ with tab_schedule:
                         for a, b in conflicts:
                             st.write(
                                 f"- **{a.task.title}** "
-                                f"({a.start_time.strftime('%H:%M')}–{a.end_time.strftime('%H:%M')}) "
+                                f"({_fmt(a.start_time)}–{_fmt(a.end_time)}) "
                                 f"overlaps with **{b.task.title}** "
-                                f"({b.start_time.strftime('%H:%M')}–{b.end_time.strftime('%H:%M')})"
+                                f"({_fmt(b.start_time)}–{_fmt(b.end_time)})"
                             )
                 else:
                     st.success("✅ No conflicts — your day is clean!")
