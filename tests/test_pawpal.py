@@ -359,3 +359,102 @@ def test_detect_conflicts_no_overlap():
     schedule = scheduler.generate_schedule()
     conflicts = scheduler.detect_conflicts(schedule)
     assert conflicts == []
+
+
+def test_detect_conflicts_exact_same_start_time():
+    """Two tasks with identical start times should be flagged as a conflict."""
+    owner = Owner("Jordan", available_start="08:00", available_end="20:00")
+    scheduler = Scheduler(owner)
+    today = datetime.today().replace(second=0, microsecond=0)
+    t1 = make_task("Walk",  duration=30, scheduled_time=today.replace(hour=10))
+    t2 = make_task("Feed",  duration=15, scheduled_time=today.replace(hour=10))
+    pet = make_pet()
+    pet.add_task(t1); pet.add_task(t2)
+    owner.add_pet(pet)
+    schedule = scheduler.generate_schedule()
+    conflicts = scheduler.detect_conflicts(schedule)
+    assert len(conflicts) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Edge cases
+# ---------------------------------------------------------------------------
+
+def test_schedule_empty_when_owner_has_no_pets():
+    """An owner with no pets should produce an empty schedule."""
+    owner = Owner("Jordan", available_start="08:00", available_end="20:00")
+    schedule = Scheduler(owner).generate_schedule()
+    assert schedule == []
+
+
+def test_schedule_empty_when_pet_has_no_tasks():
+    """A pet with no tasks should contribute nothing to the schedule."""
+    owner = Owner("Jordan", available_start="08:00", available_end="20:00")
+    owner.add_pet(make_pet())   # pet has no tasks
+    schedule = Scheduler(owner).generate_schedule()
+    assert schedule == []
+
+
+def test_filter_no_matches_returns_empty_list():
+    """filter_tasks() should return [] when nothing matches — not raise an error."""
+    owner = Owner("Jordan")
+    scheduler = Scheduler(owner)
+    t1 = make_task("Walk"); t1.pet_name = "Mochi"
+    result = scheduler.filter_tasks([t1], pet_name="Luna")
+    assert result == []
+
+
+def test_filter_empty_input_returns_empty_list():
+    """filter_tasks() on an empty list should return [] without errors."""
+    scheduler = Scheduler(Owner("Jordan"))
+    assert scheduler.filter_tasks([], pet_name="Mochi") == []
+
+
+def test_task_that_exactly_fills_window_is_included():
+    """A task whose duration exactly matches the available window should be scheduled."""
+    owner = Owner("Jordan", available_start="08:00", available_end="09:00")
+    pet = make_pet()
+    pet.add_task(make_task("Exactly 60 min", duration=60))
+    owner.add_pet(pet)
+    schedule = Scheduler(owner).generate_schedule()
+    assert len(schedule) == 1
+
+
+def test_explain_plan_before_generate_returns_safe_message():
+    """explain_plan() before generate_schedule() should return a fallback string."""
+    scheduler = Scheduler(Owner("Jordan"))
+    msg = scheduler.explain_plan()
+    assert isinstance(msg, str)
+    assert len(msg) > 0
+
+
+def test_remove_pet_nonexistent_returns_false():
+    """remove_pet() with an unknown name should return False without crashing."""
+    owner = Owner("Jordan")
+    owner.add_pet(make_pet("Mochi"))
+    assert owner.remove_pet("Ghost") is False
+    assert len(owner.pets) == 1
+
+
+def test_complete_task_bad_id_returns_false():
+    """complete_task() with an unknown id should return False."""
+    pet = make_pet()
+    pet.add_task(make_task())
+    assert pet.complete_task("bad-id") is False
+
+
+def test_recurring_task_no_base_time_spawns_relative_to_now():
+    """A recurring task with no scheduled_time should spawn next relative to now."""
+    from datetime import timedelta
+    pet = make_pet()
+    task = Task("Daily meds", TaskType.MEDICATION, 5, Priority.HIGH,
+                is_recurring=True, recurrence_interval_hours=24)
+    pet.add_task(task)
+    before = datetime.now()
+    pet.complete_task(task.id)
+    after = datetime.now()
+    spawned = pet.tasks[1]
+    assert spawned.scheduled_time is not None
+    expected_low  = before + timedelta(hours=24)
+    expected_high = after  + timedelta(hours=24)
+    assert expected_low <= spawned.scheduled_time <= expected_high
