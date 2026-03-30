@@ -64,23 +64,23 @@ The scheduler checks for conflicts *after* placing tasks rather than preventing 
 
 **a. How you used AI**
 
-AI was used at every phase of this project, but the role shifted as the work progressed:
+I used AI tools at every phase of this project, but I made sure my role as the architect never disappeared — I directed the AI rather than letting it drive.
 
-- **Design brainstorming (Phase 1):** AI generated the initial Mermaid.js UML diagram from a plain-English description of the four classes. This was the fastest part — describing the system in natural language and getting a structured diagram in seconds was far quicker than drawing it by hand. The most useful prompt pattern was: *"Here are my four classes and their attributes — generate a class diagram showing relationships."*
+- **Design brainstorming (Phase 1):** I described the four classes I had in mind to Copilot and asked it to produce a Mermaid.js UML diagram. I already knew what classes I needed — I used the AI to visualise the relationships quickly rather than draw the diagram by hand. The prompt that worked best for me was: *"Here are my four classes and their attributes — generate a class diagram showing relationships."* I then reviewed the output and adjusted the relationships myself.
 
-- **Code scaffolding (Phase 2):** AI filled in method stubs from the UML. The most helpful prompts were specific: *"Implement `generate_schedule()` so that fixed-time tasks are placed first, then flexible tasks fill remaining gaps in priority order."* Vague prompts like *"implement the scheduler"* produced overly complex results.
+- **Code scaffolding (Phase 2):** I used Copilot to fill in method stubs once I had already decided what each method should do. I found that specific prompts worked much better than vague ones. When I said *"Implement `generate_schedule()` so that fixed-time tasks are placed first, then flexible tasks fill remaining gaps in priority order"*, I got useful code. When I tried *"implement the scheduler"*, the result was overcomplicated and I had to rewrite it.
 
-- **Algorithm review (Phases 3–4):** AI was used as a "reviewer" by sharing a method and asking *"What edge cases is this missing?"* This surfaced the `detect_conflicts` timing issue (operating on Tasks before scheduling vs. on ScheduleEntry after) and the recurring task spawn problem.
+- **Algorithm review (Phases 3–4):** I used Copilot as a reviewer — I shared a completed method and asked *"What edge cases is this missing?"* This is where I caught that `detect_conflicts` was checking `Task` objects before times were assigned, which meant it would never find a conflict on flexible tasks. I spotted the flaw in the AI's logic and redesigned the method myself.
 
-- **Test generation (Phase 5):** AI generated test stubs well, but tended to write only happy-path tests. Prompting specifically for *"edge cases and failure modes"* was necessary to get tests like `test_filter_empty_input_returns_empty_list` and `test_complete_task_bad_id_returns_false`.
+- **Test generation (Phase 5):** I used Copilot to draft initial test stubs, but I noticed it only wrote happy-path tests. I had to specifically prompt for *"edge cases and failure modes"* to get tests like `test_filter_empty_input_returns_empty_list`. I also wrote several edge case tests myself after thinking through what could go wrong at runtime.
 
 **b. Judgment and verification**
 
-One AI suggestion that was modified: when asked to implement `detect_conflicts()`, the AI's first version compared `Task` objects directly using their `scheduled_time` attribute. This would have worked for tasks with a fixed time, but silently produced no conflicts for flexible tasks (which have `scheduled_time = None`). The issue was that conflicts only exist *after* the scheduler assigns times — not before.
+The clearest example of me overriding an AI suggestion was with `detect_conflicts()`. Copilot's first version compared `Task` objects directly using their `scheduled_time` attribute. I recognised this was wrong — flexible tasks have `scheduled_time = None`, so this approach would silently return no conflicts even when tasks obviously overlapped after being scheduled.
 
-The fix was to move conflict detection downstream to operate on `ScheduleEntry` objects instead of `Task` objects. The AI's approach was verified by writing a test with two overlapping flexible tasks and confirming that the original version returned no conflicts where it should have found one.
+I rejected that version and redesigned the method to operate on `ScheduleEntry` objects instead, which are only created *after* the scheduler assigns concrete start and end times. I verified my version was correct by writing a test that scheduled two overlapping flexible tasks and confirmed a conflict was detected — the AI's original version failed that test.
 
-The rule applied: *if a method's inputs don't contain all the information needed to compute its output, the method is operating at the wrong stage.*
+My rule of thumb: *if a method's inputs don't contain all the information it needs, it's working at the wrong stage of the pipeline.*
 
 ---
 
