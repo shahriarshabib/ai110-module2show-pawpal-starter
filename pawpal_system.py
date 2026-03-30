@@ -3,10 +3,11 @@ PawPal+ — Backend logic layer.
 
 Classes
 -------
-Task      : A single care action for a pet (dataclass).
-Pet       : A pet with its own task list (dataclass).
-Owner     : A person who owns one or more pets.
-Scheduler : Builds and explains a daily care schedule.
+Task          : A single care action for a pet (dataclass).
+Pet           : A pet with its own task list (dataclass).
+Owner         : A person who owns one or more pets.
+ScheduleEntry : One typed slot in a generated daily schedule.
+Scheduler     : Builds and explains a daily care schedule.
 """
 
 from __future__ import annotations
@@ -54,31 +55,46 @@ class Task:
     task_type: TaskType
     duration_minutes: int
     priority: Priority = Priority.MEDIUM
-    scheduled_time: Optional[datetime] = None   # wall-clock start time if known
+    scheduled_time: Optional[datetime] = None
     is_recurring: bool = False
-    recurrence_interval_hours: Optional[int] = None  # e.g. 8 for every 8 hours
+    recurrence_interval_hours: Optional[int] = None
     notes: str = ""
-    pet_name: str = ""          # stamped by Pet.add_task() — lets Scheduler label entries
-    id: str = field(default_factory=lambda: str(uuid.uuid4()))  # unique ID for reliable removal
+    pet_name: str = ""
+    completed: bool = False
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
-    # ------------------------------------------------------------------
-    # Methods (stubs — implement in later phases)
-    # ------------------------------------------------------------------
+    def mark_complete(self) -> None:
+        """Mark this task as completed."""
+        self.completed = True
 
     def is_overdue(self, reference_time: Optional[datetime] = None) -> bool:
-        """Return True if the task's scheduled_time has passed."""
-        # TODO: compare scheduled_time to reference_time (or datetime.now())
-        pass
+        """Return True if the task's scheduled_time has passed and it is not completed."""
+        if self.scheduled_time is None:
+            return False
+        ref = reference_time or datetime.now()
+        return not self.completed and self.scheduled_time < ref
 
     def next_occurrence(self) -> Optional[datetime]:
-        """Return the next scheduled_time for a recurring task."""
-        # TODO: add recurrence_interval_hours to scheduled_time
-        pass
+        """Return the next scheduled_time for a recurring task, or None if not recurring."""
+        if not self.is_recurring or self.recurrence_interval_hours is None:
+            return None
+        base = self.scheduled_time or datetime.now()
+        return base + timedelta(hours=self.recurrence_interval_hours)
 
     def to_dict(self) -> dict:
-        """Serialize to a plain dict (useful for Streamlit tables)."""
-        # TODO: return all fields as a JSON-serialisable dict
-        pass
+        """Serialize to a plain dict suitable for Streamlit tables."""
+        return {
+            "id": self.id,
+            "title": self.title,
+            "type": self.task_type.value,
+            "duration_min": self.duration_minutes,
+            "priority": self.priority.value,
+            "scheduled_time": self.scheduled_time.strftime("%H:%M") if self.scheduled_time else "",
+            "recurring": self.is_recurring,
+            "completed": self.completed,
+            "pet": self.pet_name,
+            "notes": self.notes,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -90,34 +106,31 @@ class Pet:
     """Represents a pet and the tasks associated with its care."""
 
     name: str
-    species: str          # e.g. "dog", "cat", "rabbit"
-    age: float            # years
+    species: str
+    age: float
     breed: str = ""
     tasks: list[Task] = field(default_factory=list)
 
-    # ------------------------------------------------------------------
-    # Methods (stubs)
-    # ------------------------------------------------------------------
-
     def add_task(self, task: Task) -> None:
-        """Stamp pet_name onto the task, then append it to this pet's task list."""
-        # TODO: validate task type is appropriate for species, then stamp and append
-        pass
+        """Stamp pet_name onto the task and append it to this pet's task list."""
+        task.pet_name = self.name
+        self.tasks.append(task)
 
     def remove_task(self, task_id: str) -> bool:
         """Remove the task with the given id; return True if found."""
-        # TODO: search tasks by task.id (not title), pop if found
-        pass
+        for i, t in enumerate(self.tasks):
+            if t.id == task_id:
+                self.tasks.pop(i)
+                return True
+        return False
 
     def get_tasks_by_priority(self, priority: Priority) -> list[Task]:
         """Return all tasks with the given priority level."""
-        # TODO: filter self.tasks by priority
-        pass
+        return [t for t in self.tasks if t.priority == priority]
 
     def get_tasks_by_type(self, task_type: TaskType) -> list[Task]:
         """Return all tasks of the given type."""
-        # TODO: filter self.tasks by task_type
-        pass
+        return [t for t in self.tasks if t.task_type == task_type]
 
 
 # ---------------------------------------------------------------------------
@@ -130,48 +143,61 @@ class Owner:
     def __init__(self, name: str, available_start: str = "08:00",
                  available_end: str = "20:00") -> None:
         self.name = name
-        self.available_start = available_start  # "HH:MM" 24-hour format
+        self.available_start = available_start
         self.available_end = available_end
         self.pets: list[Pet] = []
 
-    # ------------------------------------------------------------------
-    # Methods (stubs)
-    # ------------------------------------------------------------------
-
     def add_pet(self, pet: Pet) -> None:
-        """Register a pet under this owner."""
-        # TODO: append pet to self.pets (guard against duplicates by name)
-        pass
+        """Register a pet; silently ignores duplicates by name."""
+        if not any(p.name == pet.name for p in self.pets):
+            self.pets.append(pet)
 
     def remove_pet(self, name: str) -> bool:
         """Remove a pet by name; return True if found."""
-        # TODO: find pet by name and remove from list
-        pass
+        for i, p in enumerate(self.pets):
+            if p.name == name:
+                self.pets.pop(i)
+                return True
+        return False
 
     def get_all_tasks(self) -> list[Task]:
-        """Return every task across all pets (flat list)."""
-        # TODO: flatten [pet.tasks for pet in self.pets]
-        pass
+        """Return every task across all pets as a flat list."""
+        return [task for pet in self.pets for task in pet.tasks]
 
     def available_minutes(self) -> int:
-        """Return total available minutes in the owner's window."""
-        # TODO: parse available_start / available_end and compute difference
-        pass
+        """Return total available care minutes in the owner's daily window."""
+        fmt = "%H:%M"
+        start = datetime.strptime(self.available_start, fmt)
+        end = datetime.strptime(self.available_end, fmt)
+        return int((end - start).total_seconds() // 60)
 
 
 # ---------------------------------------------------------------------------
-# ScheduleEntry  (replaces the untyped dict that Scheduler used to return)
+# ScheduleEntry
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ScheduleEntry:
-    """One slot in a generated daily schedule."""
+    """One typed slot in a generated daily schedule."""
 
     pet_name: str
     task: Task
     start_time: datetime
     end_time: datetime
-    reason: str = ""   # plain-English explanation of why/when this was placed
+    reason: str = ""
+
+    def to_dict(self) -> dict:
+        """Serialize to a plain dict suitable for Streamlit tables."""
+        return {
+            "pet": self.pet_name,
+            "task": self.task.title,
+            "type": self.task.task_type.value,
+            "priority": self.task.priority.value,
+            "start": self.start_time.strftime("%H:%M"),
+            "end": self.end_time.strftime("%H:%M"),
+            "duration_min": self.task.duration_minutes,
+            "reason": self.reason,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -183,40 +209,113 @@ class Scheduler:
 
     def __init__(self, owner: Owner) -> None:
         self.owner = owner
-        self._schedule: list[ScheduleEntry] = []  # populated by generate_schedule()
-
-    # ------------------------------------------------------------------
-    # Core scheduling methods (stubs)
-    # ------------------------------------------------------------------
+        self._schedule: list[ScheduleEntry] = []
 
     def sort_by_priority(self, tasks: list[Task]) -> list[Task]:
-        """Return tasks sorted descending by priority, then by scheduled_time."""
-        # TODO: use Priority.numeric() as the sort key
-        pass
+        """Return tasks sorted descending by priority; fixed-time tasks come first within each tier."""
+        def sort_key(t: Task):
+            time_key = t.scheduled_time or datetime.max
+            return (-t.priority.numeric(), time_key)
+        return sorted(tasks, key=sort_key)
 
     def detect_conflicts(self, entries: list[ScheduleEntry]) -> list[tuple[ScheduleEntry, ScheduleEntry]]:
         """Return pairs of entries whose time windows overlap."""
-        # TODO: for each consecutive pair check if start_time + duration overlaps next start_time
-        pass
+        conflicts = []
+        sorted_entries = sorted(entries, key=lambda e: e.start_time)
+        for i in range(len(sorted_entries) - 1):
+            a = sorted_entries[i]
+            b = sorted_entries[i + 1]
+            if a.end_time > b.start_time:
+                conflicts.append((a, b))
+        return conflicts
 
     def generate_schedule(self, date: Optional[datetime] = None) -> list[ScheduleEntry]:
         """
         Build a day plan for the given date.
 
-        Returns a list of ScheduleEntry objects (typed, Streamlit-friendly).
+        Fixed-time tasks are placed at their scheduled_time; remaining tasks
+        are slotted sequentially after the last placed task, in priority order.
+        Tasks that exceed the owner's available window are skipped.
         """
-        # TODO:
-        #   1. Collect all tasks from owner.get_all_tasks()
-        #   2. Sort by priority (and fixed scheduled_time if set)
-        #   3. Fit tasks into the owner's available window
-        #   4. Flag conflicts; skip or reschedule low-priority tasks
-        #   5. Build ScheduleEntry objects, populate self._schedule, and return it
-        pass
+        today = (date or datetime.now()).replace(hour=0, minute=0, second=0, microsecond=0)
+        fmt = "%H:%M"
+        window_start = datetime.strptime(self.owner.available_start, fmt).replace(
+            year=today.year, month=today.month, day=today.day)
+        window_end = datetime.strptime(self.owner.available_end, fmt).replace(
+            year=today.year, month=today.month, day=today.day)
+
+        all_tasks = self.sort_by_priority(self.owner.get_all_tasks())
+
+        fixed: list[Task] = []
+        flexible: list[Task] = []
+        for t in all_tasks:
+            if t.scheduled_time is not None:
+                fixed.append(t)
+            else:
+                flexible.append(t)
+
+        entries: list[ScheduleEntry] = []
+
+        # Place fixed-time tasks first
+        for task in fixed:
+            start = task.scheduled_time.replace(
+                year=today.year, month=today.month, day=today.day)
+            end = start + timedelta(minutes=task.duration_minutes)
+            if start >= window_start and end <= window_end:
+                entries.append(ScheduleEntry(
+                    pet_name=task.pet_name,
+                    task=task,
+                    start_time=start,
+                    end_time=end,
+                    reason=f"Fixed appointment at {start.strftime('%H:%M')} "
+                           f"({task.priority.value} priority)",
+                ))
+
+        # Slot flexible tasks into remaining time
+        cursor = window_start
+        for task in flexible:
+            # Advance cursor past any fixed entry that occupies this slot
+            for entry in sorted(entries, key=lambda e: e.start_time):
+                if entry.start_time < cursor + timedelta(minutes=task.duration_minutes) \
+                        and entry.end_time > cursor:
+                    cursor = entry.end_time
+
+            end = cursor + timedelta(minutes=task.duration_minutes)
+            if end > window_end:
+                continue  # doesn't fit — skip
+
+            entries.append(ScheduleEntry(
+                pet_name=task.pet_name,
+                task=task,
+                start_time=cursor,
+                end_time=end,
+                reason=f"Scheduled at {cursor.strftime('%H:%M')} "
+                       f"({task.priority.value} priority)",
+            ))
+            cursor = end
+
+        self._schedule = sorted(entries, key=lambda e: e.start_time)
+        return self._schedule
 
     def explain_plan(self) -> str:
         """Return a human-readable explanation of the current schedule."""
-        # TODO: iterate self._schedule and build a formatted string
-        pass
+        if not self._schedule:
+            return "No schedule generated yet. Call generate_schedule() first."
+        lines = [f"=== Daily Schedule for {self.owner.name} ===\n"]
+        for entry in self._schedule:
+            lines.append(
+                f"  {entry.start_time.strftime('%H:%M')} - {entry.end_time.strftime('%H:%M')} "
+                f"| [{entry.task.priority.value.upper()}] {entry.task.title} "
+                f"({entry.pet_name}, {entry.task.duration_minutes} min)"
+            )
+            if entry.reason:
+                lines.append(f"    -> {entry.reason}")
+        conflicts = self.detect_conflicts(self._schedule)
+        if conflicts:
+            lines.append("\n[!] Conflicts detected:")
+            for a, b in conflicts:
+                lines.append(f"  '{a.task.title}' overlaps with '{b.task.title}'")
+        return "\n".join(lines)
 
     def get_schedule(self) -> list[ScheduleEntry]:
         """Return the most recently generated schedule."""
